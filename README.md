@@ -26,8 +26,14 @@ A modern, responsive logistics company website cloned from http://jpeglogistics.
 ├── services.html       # Services page
 ├── about.html          # About page
 ├── contact.html        # Contact page
+├── admin.html          # Admin dashboard
+├── tracking.html       # Tracking page
 ├── styles.css          # All CSS styling
 ├── script.js           # JavaScript functionality
+├── server.js           # Backend API server (Node.js)
+├── package.json        # Node.js dependencies
+├── data/               # Data storage directory (created automatically)
+│   └── shipments.json  # Shipment data file
 └── README.md           # Documentation
 ```
 
@@ -41,14 +47,69 @@ A modern, responsive logistics company website cloned from http://jpeglogistics.
 
 ## Technologies Used
 
+### Frontend
 - HTML5
 - CSS3 (with custom properties and animations)
 - JavaScript (vanilla)
 - Google Fonts (Inter)
 
+### Backend (Optional)
+- Node.js
+- Express.js
+- CORS middleware
+- File system storage (JSON file)
+
 ## Getting Started
 
+### Frontend Only (Local Storage - Single Device)
 Simply open `index.html` in your web browser to view the website. No build process or dependencies required.
+
+**Note:** By default, shipments are stored in browser localStorage, which means data is device-specific and not shared across devices.
+
+### Full Setup (Backend API - Multi-Device Support)
+
+To enable shipment data synchronization across multiple devices, you need to run a backend server:
+
+1. **Install Node.js** (if not already installed)
+   - Download from https://nodejs.org/
+   - Verify installation: `node --version`
+
+2. **Install Dependencies**
+   ```bash
+   npm install
+   ```
+
+3. **Start the Backend Server**
+   ```bash
+   npm start
+   ```
+   The server will run on `http://localhost:3000`
+
+4. **Open the Website**
+   - Open `admin.html` or `tracking.html` in your browser
+   - The frontend will automatically connect to the API at `http://localhost:3000/api`
+
+5. **API Configuration** (Optional)
+   - If your server runs on a different port or domain, set the API URL before loading the page:
+   ```html
+   <script>
+       window.API_BASE_URL = 'http://your-server:3000/api';
+   </script>
+   <script src="script.js"></script>
+   ```
+
+### Backend API Endpoints
+
+- `GET /api/shipments` - Get all shipments
+- `GET /api/shipments/track/:trackingNo` - Find shipment by tracking number
+- `POST /api/shipments` - Create new shipment
+- `PUT /api/shipments/:id` - Update existing shipment
+- `DELETE /api/shipments/:id` - Delete shipment
+- `GET /api/health` - Health check endpoint
+
+### Data Storage
+
+Shipment data is stored in `data/shipments.json`. This file is automatically created when the server runs for the first time.
 
 ## Browser Support
 

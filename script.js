@@ -88,20 +88,106 @@ if (statsSection) {
 
 // --- ADMIN DASHBOARD LOGIC ---
 (function () {
-    const STORAGE_KEY = 'jp_shipments';
     const PAGE_SIZE = 10;
+    // API base URL - adjust if your server is on a different port/domain
+    const API_BASE_URL = window.API_BASE_URL || 'http://localhost:3000/api';
+    
+    // Show error message helper
+    function showError(message) {
+        console.error('API Error:', message);
+        alert('Error: ' + message + '\n\nMake sure the backend server is running on port 3000.');
+    }
 
-    function readStore() {
+    // Fetch all shipments from API
+    async function readStore() {
         try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            return raw ? JSON.parse(raw) : [];
-        } catch (e) {
+            const response = await fetch(`${API_BASE_URL}/shipments`);
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            const data = await response.json();
+            return Array.isArray(data) ? data : [];
+        } catch (error) {
+            console.error('Failed to fetch shipments:', error);
+            // Return empty array on error (allows UI to still work)
             return [];
         }
     }
 
-    function writeStore(shipments) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(shipments));
+    // Create new shipment via API
+    async function createShipment(shipment) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/shipments`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(shipment),
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            showError('Failed to create shipment: ' + error.message);
+            throw error;
+        }
+    }
+
+    // Update existing shipment via API
+    async function updateShipment(id, shipment) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/shipments/${id}`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(shipment),
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            showError('Failed to update shipment: ' + error.message);
+            throw error;
+        }
+    }
+
+    // Delete shipment via API
+    async function deleteShipment(id) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/shipments/${id}`, {
+                method: 'DELETE',
+            });
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.error || `HTTP ${response.status}`);
+            }
+            return await response.json();
+        } catch (error) {
+            showError('Failed to delete shipment: ' + error.message);
+            throw error;
+        }
+    }
+
+    // Find shipment by tracking number via API
+    async function findByTrackingNumber(trackingNo) {
+        try {
+            const response = await fetch(`${API_BASE_URL}/shipments/track/${encodeURIComponent(trackingNo)}`);
+            if (response.status === 404) {
+                return null;
+            }
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            return await response.json();
+        } catch (error) {
+            console.error('Failed to find shipment:', error);
+            return null;
+        }
     }
 
     function generateId() {
@@ -145,12 +231,15 @@ if (statsSection) {
         return d.toLocaleString();
     }
 
-    function renderTable(state) {
+    async function renderTable(state) {
         const tbody = document.getElementById('shipments-tbody');
         const summary = document.getElementById('table-summary');
         if (!tbody || !summary) return;
 
-        const all = readStore();
+        // Show loading state
+        tbody.innerHTML = '<tr><td colspan="7" class="px-6 py-8 text-center text-text-secondary">Loading shipments...</td></tr>';
+        
+        const all = await readStore();
 
         const q = (state.search || '').trim().toLowerCase();
         const statusFilter = state.status || '';
@@ -328,7 +417,7 @@ if (statsSection) {
         
         proceedWithSave(null);
         
-        function proceedWithSave(imageBase64) {
+        async function proceedWithSave(imageBase64) {
             function get(id) { return document.getElementById(id).value.trim(); }
             const id = get('shipment-id');
             let trackingNo = get('tracking-no');
@@ -381,7 +470,6 @@ if (statsSection) {
                 return;
             }
 
-            const store = readStore();
             const now = Date.now();
             let isNew = false;
             let oldStatus = null;
@@ -394,171 +482,225 @@ if (statsSection) {
             
             const featuredImage = imageBase64;
             
-            if (id) {
-                const idx = store.findIndex(s => s.id === id);
-                if (idx >= 0) {
-                    oldStatus = store[idx].status;
-                    const existingImage = store[idx].featuredImage;
-                    store[idx] = { 
-                        ...store[idx], 
-                        trackingNo, 
-                        sender, 
-                        receiver, 
-                        status, 
-                        cargoType,
-                        statusDate,
-                        statusTime,
-                        location,
-                        carrierRef,
-                        departureDate,
-                        departureTime,
-                        comments,
-                        origin, 
-                        destination, 
-                        notes,
-                        featuredImage: featuredImage || existingImage || null,
-                        updatedAt: now 
-                    };
-                }
-            } else {
-                isNew = true;
-                store.unshift({ 
-                    id: generateId(), 
-                    trackingNo, 
-                    sender, 
-                    receiver, 
-                    status, 
-                    cargoType,
-                    statusDate,
-                    statusTime,
-                    location,
-                    carrierRef,
-                    departureDate,
-                    departureTime,
-                    comments,
-                    origin, 
-                    destination, 
-                    notes,
-                    featuredImage: featuredImage || null,
-                    createdAt: now, 
-                    updatedAt: now 
-                });
-            }
-            writeStore(store);
-
-            // Close modal and refresh table after save
-            closeModal();
-            
-            // Get current state from UI to preserve filters
-            const searchInput = document.getElementById('search-input');
-            const statusFilter = document.getElementById('status-filter');
-            const sortSelect = document.getElementById('sort-select');
-            const currentState = {
-                search: searchInput ? searchInput.value : '',
-                status: statusFilter ? statusFilter.value : '',
-                sort: sortSelect ? sortSelect.value : 'updatedAt:desc',
-                page: 0
+            // Prepare shipment data
+            const shipmentData = {
+                trackingNo, 
+                sender, 
+                receiver, 
+                status, 
+                cargoType,
+                statusDate,
+                statusTime,
+                location,
+                carrierRef,
+                departureDate,
+                departureTime,
+                comments,
+                origin, 
+                destination, 
+                notes,
+                featuredImage: featuredImage || null
             };
-            renderTable(currentState);
             
-            // Send emails on creation or status change
-            const statusChanged = isNew || (oldStatus && oldStatus !== status);
-            if (statusChanged || isNew) {
-                const remarks = comments || notes || '';
-                sendStatusEmail(
-                    sender.email, 
-                    receiver.email, 
-                    trackingNo, 
-                    status, 
-                    location, 
-                    statusDate, 
-                    statusTime, 
-                    remarks, 
-                    isNew
-                );
-                setTimeout(() => {
-                    alert(isNew 
-                        ? 'Shipment created! Email notifications sent to shipper and receiver.' 
-                        : 'Status updated! Email notifications sent to shipper and receiver.');
-                }, 1000);
-            } else {
-                // Still show success message even if status didn't change
-                setTimeout(() => {
-                    alert('Shipment updated successfully!');
-                }, 100);
+            try {
+                let savedShipment;
+                
+                if (id) {
+                    // Update existing shipment - need to fetch old status first
+                    const all = await readStore();
+                    const existing = all.find(s => s.id === id);
+                    if (existing) {
+                        oldStatus = existing.status;
+                        if (existing.featuredImage && !featuredImage) {
+                            shipmentData.featuredImage = existing.featuredImage;
+                        }
+                    }
+                    savedShipment = await updateShipment(id, shipmentData);
+                } else {
+                    // Create new shipment
+                    isNew = true;
+                    shipmentData.id = generateId();
+                    shipmentData.createdAt = now;
+                    shipmentData.updatedAt = now;
+                    savedShipment = await createShipment(shipmentData);
+                }
+
+                // Close modal and refresh table after save
+                closeModal();
+                
+                // Get current state from UI to preserve filters
+                const searchInput = document.getElementById('search-input');
+                const statusFilter = document.getElementById('status-filter');
+                const sortSelect = document.getElementById('sort-select');
+                const currentState = {
+                    search: searchInput ? searchInput.value : '',
+                    status: statusFilter ? statusFilter.value : '',
+                    sort: sortSelect ? sortSelect.value : 'updatedAt:desc',
+                    page: 0
+                };
+                // Update global state
+                if (window.adminDashboardState) {
+                    Object.assign(window.adminDashboardState, currentState);
+                }
+                await renderTable(currentState);
+                
+                // Send emails on creation or status change
+                const statusChanged = isNew || (oldStatus && oldStatus !== status);
+                if (statusChanged || isNew) {
+                    const remarks = comments || notes || '';
+                    sendStatusEmail(
+                        sender.email, 
+                        receiver.email, 
+                        trackingNo, 
+                        status, 
+                        location, 
+                        statusDate, 
+                        statusTime, 
+                        remarks, 
+                        isNew
+                    );
+                    setTimeout(() => {
+                        alert(isNew 
+                            ? 'Shipment created! Email notifications sent to shipper and receiver.' 
+                            : 'Status updated! Email notifications sent to shipper and receiver.');
+                    }, 1000);
+                } else {
+                    // Still show success message even if status didn't change
+                    setTimeout(() => {
+                        alert('Shipment updated successfully!');
+                    }, 100);
+                }
+            } catch (error) {
+                // Error already shown in createShipment/updateShipment
+                console.error('Save failed:', error);
             }
         } // End proceedWithSave
     }
 
-    function exportJSON() {
-        const data = readStore();
-        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = 'shipments-export.json';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+    async function exportJSON() {
+        try {
+            const data = await readStore();
+            const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'shipments-export.json';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        } catch (error) {
+            showError('Failed to export shipments: ' + error.message);
+        }
     }
 
-    function importJSON(file, onDone) {
+    async function importJSON(file, onDone) {
         const reader = new FileReader();
-        reader.onload = () => {
+        reader.onload = async () => {
             try {
                 const arr = JSON.parse(reader.result);
-                if (Array.isArray(arr)) {
-                    writeStore(arr);
-                    onDone(true);
-                } else {
+                if (!Array.isArray(arr)) {
                     onDone(false);
+                    return;
                 }
+                
+                // Import shipments one by one via API
+                let successCount = 0;
+                let failCount = 0;
+                
+                for (const shipment of arr) {
+                    try {
+                        if (shipment.id) {
+                            // Try to update if exists, otherwise create
+                            try {
+                                await updateShipment(shipment.id, shipment);
+                            } catch {
+                                await createShipment(shipment);
+                            }
+                        } else {
+                            await createShipment(shipment);
+                        }
+                        successCount++;
+                    } catch (error) {
+                        failCount++;
+                        console.error('Failed to import shipment:', shipment.trackingNo, error);
+                    }
+                }
+                
+                if (successCount > 0) {
+                    alert(`Imported ${successCount} shipment(s)${failCount > 0 ? `, ${failCount} failed` : ''}`);
+                } else {
+                    alert('Failed to import any shipments.');
+                }
+                
+                onDone(successCount > 0);
             } catch (e) {
+                console.error('Import error:', e);
                 onDone(false);
             }
         };
         reader.readAsText(file);
     }
 
-    function seedIfEmpty() {
-        const current = readStore();
-        if (current.length === 0) {
-            const now = Date.now();
-            writeStore([
-                {
-                    id: generateId(),
-                    trackingNo: 'JP123456789',
-                    sender: {
-                        name: 'Ana Becker', email: 'ana@example.com', phone: '+493012345', street: 'Alexanderstr 1', city: 'Berlin', state: 'BE', country: 'DE', postal: '10117'
+    async function seedIfEmpty() {
+        try {
+            const current = await readStore();
+            if (current.length === 0) {
+                const now = Date.now();
+                const seedShipments = [
+                    {
+                        id: generateId(),
+                        trackingNo: 'JP123456789',
+                        sender: {
+                            name: 'Ana Becker', email: 'ana@example.com', phone: '+493012345', city: 'Berlin', state: 'BE', country: 'DE'
+                        },
+                        receiver: {
+                            name: 'Jeff Miller', email: 'jeff@example.com', phone: '+197212345', street: 'Main St 101', city: 'Dallas', state: 'TX', country: 'US', postal: '75201'
+                        },
+                        status: 'In Transit',
+                        cargoType: 'General',
+                        statusDate: new Date(now - 86400000).toISOString().split('T')[0],
+                        statusTime: '10:00',
+                        location: 'Frankfurt',
+                        origin: 'Berlin, DE',
+                        destination: 'Dallas, US',
+                        notes: 'Left hub - Frankfurt',
+                        createdAt: now - 86400000,
+                        updatedAt: now - 3600000
                     },
-                    receiver: {
-                        name: 'Jeff Miller', email: 'jeff@example.com', phone: '+197212345', street: 'Main St 101', city: 'Dallas', state: 'TX', country: 'US', postal: '75201'
-                    },
-                    status: 'In Transit',
-                    origin: 'Berlin, DE',
-                    destination: 'Dallas, US',
-                    notes: 'Left hub - Frankfurt',
-                    createdAt: now - 86400000,
-                    updatedAt: now - 3600000
-                },
-                {
-                    id: generateId(),
-                    trackingNo: 'JP987654321',
-                    sender: {
-                        name: 'Sophie Laurent', email: 'sophie@example.com', phone: '+331234567', street: 'Rue Rivoli 5', city: 'Paris', state: 'IDF', country: 'FR', postal: '75001'
-                    },
-                    receiver: {
-                        name: 'Brittany Jones', email: 'britt@example.com', phone: '+183212345', street: 'Park Rd 78', city: 'Houston', state: 'TX', country: 'US', postal: '77001'
-                    },
-                    status: 'Pending',
-                    origin: 'Paris, FR',
-                    destination: 'Houston, US',
-                    notes: '',
-                    createdAt: now - 172800000,
-                    updatedAt: now - 7200000
+                    {
+                        id: generateId(),
+                        trackingNo: 'JP987654321',
+                        sender: {
+                            name: 'Sophie Laurent', email: 'sophie@example.com', phone: '+331234567', city: 'Paris', state: 'IDF', country: 'FR'
+                        },
+                        receiver: {
+                            name: 'Brittany Jones', email: 'britt@example.com', phone: '+183212345', street: 'Park Rd 78', city: 'Houston', state: 'TX', country: 'US', postal: '77001'
+                        },
+                        status: 'Pending',
+                        cargoType: 'General',
+                        statusDate: new Date(now - 172800000).toISOString().split('T')[0],
+                        statusTime: '14:30',
+                        location: 'Paris',
+                        origin: 'Paris, FR',
+                        destination: 'Houston, US',
+                        notes: '',
+                        createdAt: now - 172800000,
+                        updatedAt: now - 7200000
+                    }
+                ];
+                
+                // Create seed shipments via API
+                for (const shipment of seedShipments) {
+                    try {
+                        await createShipment(shipment);
+                    } catch (error) {
+                        console.warn('Failed to seed shipment:', shipment.trackingNo, error);
+                    }
                 }
-            ]);
+            }
+        } catch (error) {
+            console.error('Seed error (non-critical):', error);
         }
     }
 
@@ -574,33 +716,99 @@ if (statsSection) {
         const tbody = document.getElementById('shipments-tbody');
 
         if (addBtn) addBtn.addEventListener('click', () => openModal(null));
-        if (expBtn) expBtn.addEventListener('click', exportJSON);
-        if (impInput) impInput.addEventListener('change', (e) => {
+        if (expBtn) expBtn.addEventListener('click', () => exportJSON());
+        if (impInput) impInput.addEventListener('change', async (e) => {
             const file = e.target.files && e.target.files[0];
-            if (file) importJSON(file, (ok) => { if (ok) { state.page = 0; renderTable(state); } });
+            if (file) {
+                await importJSON(file, async (ok) => { 
+                    if (ok) { 
+                        state.page = 0; 
+                        await renderTable(state);
+                        // Update global state for auto-refresh
+                        if (window.adminDashboardState) {
+                            window.adminDashboardState.page = 0;
+                        }
+                    } 
+                });
+            }
             e.target.value = '';
         });
 
-        if (searchInput) searchInput.addEventListener('input', (e) => { state.search = e.target.value; state.page = 0; renderTable(state); });
-        if (statusFilter) statusFilter.addEventListener('change', (e) => { state.status = e.target.value; state.page = 0; renderTable(state); });
-        if (sortSelect) sortSelect.addEventListener('change', (e) => { state.sort = e.target.value; state.page = 0; renderTable(state); });
-        if (prevBtn) prevBtn.addEventListener('click', () => { if (state.page > 0) { state.page -= 1; renderTable(state); } });
-        if (nextBtn) nextBtn.addEventListener('click', () => { state.page += 1; renderTable(state); });
+        if (searchInput) searchInput.addEventListener('input', async (e) => { 
+            state.search = e.target.value; 
+            state.page = 0; 
+            await renderTable(state);
+            // Update global state for auto-refresh
+            if (window.adminDashboardState) {
+                window.adminDashboardState.search = state.search;
+                window.adminDashboardState.page = 0;
+            }
+        });
+        if (statusFilter) statusFilter.addEventListener('change', async (e) => { 
+            state.status = e.target.value; 
+            state.page = 0; 
+            await renderTable(state);
+            // Update global state for auto-refresh
+            if (window.adminDashboardState) {
+                window.adminDashboardState.status = state.status;
+                window.adminDashboardState.page = 0;
+            }
+        });
+        if (sortSelect) sortSelect.addEventListener('change', async (e) => { 
+            state.sort = e.target.value; 
+            state.page = 0; 
+            await renderTable(state);
+            // Update global state for auto-refresh
+            if (window.adminDashboardState) {
+                window.adminDashboardState.sort = state.sort;
+                window.adminDashboardState.page = 0;
+            }
+        });
+        if (prevBtn) prevBtn.addEventListener('click', async () => { 
+            if (state.page > 0) { 
+                state.page -= 1; 
+                await renderTable(state);
+                // Update global state for auto-refresh
+                if (window.adminDashboardState) {
+                    window.adminDashboardState.page = state.page;
+                }
+            } 
+        });
+        if (nextBtn) nextBtn.addEventListener('click', async () => { 
+            state.page += 1; 
+            await renderTable(state);
+            // Update global state for auto-refresh
+            if (window.adminDashboardState) {
+                window.adminDashboardState.page = state.page;
+            }
+        });
 
-        if (tbody) tbody.addEventListener('click', (e) => {
+        if (tbody) tbody.addEventListener('click', async (e) => {
             const target = e.target.closest('button');
             if (!target) return;
             const action = target.getAttribute('data-action');
             const id = target.getAttribute('data-id');
             if (!action || !id) return;
-            const store = readStore();
-            const shipment = store.find(s => s.id === id);
-            if (action === 'edit' && shipment) {
-                openModal(shipment);
+            
+            if (action === 'edit') {
+                const store = await readStore();
+                const shipment = store.find(s => s.id === id);
+                if (shipment) {
+                    openModal(shipment);
+                }
             } else if (action === 'delete') {
-                const next = store.filter(s => s.id !== id);
-                writeStore(next);
-                renderTable(state);
+                if (confirm('Are you sure you want to delete this shipment?')) {
+                    try {
+                        await deleteShipment(id);
+                        await renderTable(state);
+                        // Update global state for auto-refresh
+                        if (window.adminDashboardState) {
+                            Object.assign(window.adminDashboardState, state);
+                        }
+                    } catch (error) {
+                        // Error already shown in deleteShipment
+                    }
+                }
             }
         });
 
@@ -656,14 +864,69 @@ if (statsSection) {
         }
     }
 
-    window.initAdminDashboard = function initAdminDashboard() {
+    // Auto-refresh interval (refresh every 5 seconds)
+    let refreshInterval = null;
+    let lastRefreshTime = null;
+    
+    // Start auto-refresh
+    function startAutoRefresh(state) {
+        // Clear any existing interval
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+        }
+        
+        // Refresh every 5 seconds
+        refreshInterval = setInterval(async () => {
+            // Only refresh if page is visible
+            if (!document.hidden && window.adminDashboardState) {
+                // Use the global state which preserves current filters/search
+                await renderTable(window.adminDashboardState);
+                lastRefreshTime = Date.now();
+            }
+        }, 5000); // 5 seconds
+        
+        // Also refresh when page becomes visible again
+        let visibilityHandler = async () => {
+            if (!document.hidden && window.adminDashboardState) {
+                // Refresh immediately when tab becomes visible
+                await renderTable(window.adminDashboardState);
+                lastRefreshTime = Date.now();
+            }
+        };
+        document.addEventListener('visibilitychange', visibilityHandler);
+        
+        // Refresh on window focus (when switching back to the tab/window)
+        let focusHandler = async () => {
+            if (window.adminDashboardState) {
+                await renderTable(window.adminDashboardState);
+                lastRefreshTime = Date.now();
+            }
+        };
+        window.addEventListener('focus', focusHandler);
+    }
+    
+    // Stop auto-refresh
+    function stopAutoRefresh() {
+        if (refreshInterval) {
+            clearInterval(refreshInterval);
+            refreshInterval = null;
+        }
+    }
+
+    window.initAdminDashboard = async function initAdminDashboard() {
         const isAdminPage = document.getElementById('admin-app');
         if (!isAdminPage) return;
         
-        seedIfEmpty();
+        await seedIfEmpty();
         const state = { search: '', status: '', sort: 'updatedAt:desc', page: 0 };
         bindEvents(state);
-        renderTable(state);
+        await renderTable(state);
+        
+        // Start auto-refresh to keep data synchronized across devices
+        startAutoRefresh(state);
+        
+        // Store state globally so it can be accessed by refresh functions
+        window.adminDashboardState = state;
     };
     
     // Also initialize immediately when script loads if DOM is ready
@@ -685,9 +948,8 @@ if (statsSection) {
     window.__forceOpenModal = function () { openModal(null); };
 
     // Tracking page logic
-    function findByTracking(trackingNo) {
-        const all = readStore();
-        return all.find(s => (s.trackingNo || '').toLowerCase() === trackingNo.toLowerCase());
+    async function findByTracking(trackingNo) {
+        return await findByTrackingNumber(trackingNo);
     }
 
     function renderTrackingResult(container, shipment, trackingNo) {
@@ -740,26 +1002,31 @@ if (statsSection) {
         feather.replace();
     }
 
-    function initTrackingPage() {
+    async function initTrackingPage() {
         const form = document.getElementById('trackForm');
         const input = document.getElementById('trackingNumber');
         const result = document.getElementById('trackingResult');
         if (!form || !input || !result) return;
-        seedIfEmpty();
+        await seedIfEmpty();
 
         // Support query param ?tn=...
         const params = new URLSearchParams(window.location.search);
         const tn = params.get('tn');
         if (tn) {
             input.value = tn;
-            renderTrackingResult(result, findByTracking(tn), tn);
+            const shipment = await findByTracking(tn);
+            renderTrackingResult(result, shipment, tn);
         }
 
-        form.addEventListener('submit', (e) => {
+        form.addEventListener('submit', async (e) => {
             e.preventDefault();
             const trackingNo = input.value.trim();
             if (!trackingNo) return;
-            const match = findByTracking(trackingNo);
+            
+            // Show loading state
+            result.innerHTML = '<div class="card rounded-2xl p-6"><div class="text-text-secondary text-center">Searching...</div></div>';
+            
+            const match = await findByTracking(trackingNo);
             renderTrackingResult(result, match, trackingNo);
         });
     }
